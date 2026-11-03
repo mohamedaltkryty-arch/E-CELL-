@@ -63,7 +63,7 @@ jobs:
           python -m compileall -q app/src/main/python tests
           PYTHONPATH=app/src/main/python python -m unittest discover -s tests -v
 
-      - name: Migrate Chaquopy configuration to 17.2 DSL
+      - name: Update Chaquopy 17.2 Gradle DSL
         shell: bash
         run: |
           set -euo pipefail
@@ -71,26 +71,32 @@ jobs:
           from pathlib import Path
 
           path = Path("app/build.gradle")
-          source = path.read_text(encoding="utf-8")
-          old_block = """    sourceSets {
-          main { python.srcDir 'src/main/python' }
-      }
-      }
-
-      python {
-          version '3.11'
-      }"""
-          new_block = """}
-
-      chaquopy {
-          defaultConfig {
-              version = "3.11"
-          }
-      }"""
-          if old_block not in source:
-              raise SystemExit("Expected legacy Chaquopy configuration was not found; refusing to edit an unexpected build file.")
-          path.write_text(source.replace(old_block, new_block, 1), encoding="utf-8")
-          print("Chaquopy 17.2 configuration updated.")
+          lines = path.read_text(encoding="utf-8").splitlines()
+          start = lines.index("    sourceSets {")
+          expected = [
+              "    sourceSets {",
+              "        main { python.srcDir 'src/main/python' }",
+              "    }",
+              "}",
+              "",
+              "python {",
+              "    version '3.11'",
+              "}",
+          ]
+          if lines[start:start + len(expected)] != expected:
+              raise SystemExit("Unexpected app/build.gradle layout; refusing unsafe automatic patch.")
+          replacement = [
+              "}",
+              "",
+              "chaquopy {",
+              "    defaultConfig {",
+              '        version = "3.11"',
+              "    }",
+              "}",
+          ]
+          lines[start:start + len(expected)] = replacement
+          path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+          print("Chaquopy 17.2 DSL updated successfully.")
           PY
 
       - name: Build debug APK
