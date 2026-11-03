@@ -1,0 +1,86 @@
+name: Build SPIDER E-CELL APK
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - SPIDER_E-CELL_GITHUB_UPLOAD_READY.zip
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: spider-android-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build and verify Android APK
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Expand project source bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s SPIDER_E-CELL_GITHUB_UPLOAD_READY.zip
+          unzip -oq SPIDER_E-CELL_GITHUB_UPLOAD_READY.zip -d .
+          test -s settings.gradle
+          test -s app/build.gradle
+          test -s app/src/main/java/com/spider/ecell/MainActivity.java
+          test -s app/src/main/python/android_entry.py
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools platforms;android-35 build-tools;35.0.0'
+
+      - name: Set up Gradle 8.13
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Validate Python sources and tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m compileall -q app/src/main/python tests
+          PYTHONPATH=app/src/main/python python -m unittest discover -s tests -v
+
+      - name: Build debug APK
+        run: gradle --no-daemon --stacktrace --warning-mode all clean assembleDebug
+
+      - name: Verify APK and checksum
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK='app/build/outputs/apk/debug/app-debug.apk'
+          test -s "$APK"
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | tee "$RUNNER_TEMP/apk-badging.txt"
+          grep -q "package: name='com.spider.ecell'" "$RUNNER_TEMP/apk-badging.txt"
+          sha256sum "$APK" | tee app-debug.apk.sha256
+
+      - name: Upload installable APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: SPIDER-E-CELL-debug-apk
+          path: |
+            app/build/outputs/apk/debug/app-debug.apk
+            app-debug.apk.sha256
+          if-no-files-found: error
+          retention-days: 30
